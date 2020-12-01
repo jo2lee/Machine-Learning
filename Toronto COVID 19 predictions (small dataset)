@@ -1,0 +1,289 @@
+#Looking at Toronto Covid19 Cases in 2020
+##### Our goal in this project is to create a model of whether patients who still have COVID19 will survive or not based on the previous data. This data set was taken from Kaggle (https://www.kaggle.com/divyansh22/toronto-covid19-cases), howevet the data is not up-to-date. The reported cases with the patients' outcomes are from Jan 22, 2020 to June 30, 2020. There are patients that have the status 'ACTIVE' from June 30, 2020 to July 12, 2020. We would like to find out the ACTIVE patients' outcomes using the best model.
+
+## Import dataset and libraries
+
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set(style="darkgrid")
+%matplotlib inline
+
+import os
+
+# to make this notebook's output stable across runs
+np.random.seed(1)
+
+# To plot pretty figures
+%matplotlib inline
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+mpl.rc('axes', labelsize=14)
+mpl.rc('xtick', labelsize=12)
+mpl.rc('ytick', labelsize=12)
+
+# Ignore useless warnings (see SciPy issue #5998)
+import warnings
+warnings.filterwarnings(action="ignore", message="^internal gelsd")
+
+
+
+!pip install -U -q PyDrive
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+from google.colab import auth
+from oauth2client.client import GoogleCredentials
+import os
+import pandas as pd
+auth.authenticate_user()
+gauth = GoogleAuth()
+gauth.credentials = GoogleCredentials.get_application_default()
+drive = GoogleDrive(gauth)
+
+file_list = drive.ListFile({'q': "'1M51HZjFFHONXIdLJPkAjlABizTS4MX4x' in parents and trashed=false"}).GetList()
+for file1 in file_list:
+  print('title: %s, id: %s' % (file1['title'], file1['id']))
+
+data_downloaded = drive.CreateFile({'id': '1Nkp2iHf4qm-PTBMPo1zJBM90oFg9TlYY'})
+data_downloaded.GetContentFile('COVID19 cases Toronto.xlsx')
+
+data_downloaded = drive.CreateFile({'id': '1emJZ439GN85T8VevJYsTjVQe81vSUB-g'})
+data_downloaded.GetContentFile('Neighbourhood_Population.xlsx')
+
+data_downloaded = drive.CreateFile({'id': '1wfC0Xp8I4j706J9iuca9KipjD9M88BLK'})
+data_downloaded.GetContentFile('toronto_weather.xlsx')
+
+
+#import data
+df_covid_1=pd.read_excel('COVID19 cases Toronto.xlsx') #original file for COVID19 cases
+
+df_pop=pd.read_excel('Neighbourhood_Population.xlsx') #neighbourhood population density data
+
+df_temp_0=pd.read_excel('toronto_weather.xlsx', usecols = ['Date/Time', 'Mean Temp (°C)']) #Toronto Temperature data 
+df_temp = df_temp_0.rename(columns={"Date/Time": "Reported Date", "Mean Temp (°C)": "Mean_temp_C"})
+df_temp['Reported Date'] = pd.to_datetime(df_temp['Reported Date'])
+
+#merge density population and temperature into the covid dataset
+df_1 = pd.merge (df_covid, df_temp, how = 'left', on = ["Reported Date"])
+
+df = pd.merge (df_1, df_pop, how = 'left', on = ["Neighbourhood Name"])
+df.head()
+
+
+## Describing Data Set
+
+### Understanding the dataset with tables
+
+df.head() #dataset that include temperature and population density too
+
+df.describe()
+
+df.info()
+
+df['Age Group'].value_counts().sort_values(ascending=False)
+
+df['Source of Infection'].value_counts().sort_values(ascending=False)
+
+df['Classification'].value_counts().sort_values(ascending=False)
+
+df['Client Gender'].value_counts().sort_values(ascending=False)
+
+df['Outcome'].value_counts().sort_values(ascending=False)
+
+df[df['_id']==44296]
+
+df.groupby(['Reported Date','Outcome'])['Outcome'].count().head(20)
+
+
+
+
+
+
+
+### Understanding the data with Visualization
+
+plt.figure(figsize=(15,7))
+sns.countplot(x="Source of Infection", hue = 'Client Gender', data=df).set_title("COVID19 cases by source of infection and gender")
+plt.xticks(rotation = 15)
+
+plt.figure(figsize=(15,7))
+sns.countplot(x="Age Group", 
+              order = ['19 and younger', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90+'],
+                       data=df).set_title("COVID19 cases by Age Group")
+plt.xticks(rotation = 15)
+
+#### Does neighbourhood impact the the number of COVID19 cases?
+
+We would like to see if the location would affect the number of people who caught COVID19 and to see their outcome, so we've gathered the population density data from the City of Toronto (https://open.toronto.ca/dataset/neighbourhood-profiles/).
+
+
+sns.scatterplot(data=df, x="Neighbourhood Name", y="Population density per square kilometre") 
+#seeing the spread of COVID cases within 140 neighbourhoods in Toronto
+
+pivot = df.pivot_table(index=['Neighbourhood Name'], values=['Population density per square kilometre'], aggfunc='mean')
+pop_large = pivot.nlargest(5,'Population density per square kilometre') #gets 5 largest population densed neighbourhoods 
+pop_small = pivot.nsmallest(5,'Population density per square kilometre')#gets 5 smallest population densed neighbourhoods 
+pop_compare = pd.concat([pop_large, pop_small], keys='Neighbourhood Name')
+pop_compare['Sort'] = ['Top 5', 'Top 5', 'Top 5', 'Top 5', 'Top 5', 'Bottom 5', 'Bottom 5', 'Bottom 5', 'Bottom 5', 'Bottom 5']
+pop_compare
+
+pop_compare = pd.merge(pop_compare, df, how = 'left', on = ["Neighbourhood Name"])
+pop_compare_pivot = pop_compare.pivot_table(index=['Neighbourhood Name'], aggfunc='count')
+pop_compare_pivot
+
+plt.figure(figsize=(15,7))
+sns.countplot(x="Neighbourhood Name", 
+              order = ['North St. James Town', 'Church-Yonge Corridor', 'Mount Pleasant West', 'Regent Park', 'Taylor-Massey', 'Bridle Path-Sunnybrook-York Mills', 'West Humber-Clairville', 'Rouge', 'Humber Summit', 'York University Heights'],
+              hue = 'Sort',
+              data=pop_compare).set_title("COVID19 cases by Largest and Smallest Population density")
+plt.xticks(rotation = 10)
+
+pivot_1 = df.pivot_table(index=['Neighbourhood Name'],values=['Age Group'], aggfunc='count')
+just_pop = df[['Neighbourhood Name', 'Population density per square kilometre']]
+df_pop_count = pd.merge(pivot_1,just_pop, how = 'left', on = 'Neighbourhood Name')
+df_pop_count
+sns.scatterplot(data = df_pop_count, x='Population density per square kilometre', y= 'Age Group')
+plt.ylabel('Count of COVID19 cases')
+
+Shown above, there seems to be no correlation as to the Population density to the number of COVID 19 cases
+
+### Understanding the Outcome (Resolved, Fatal, Active)
+
+plt.figure(figsize=(15,7))
+sns.countplot(x="Outcome", data=df).set_title("COVID19 cases by Outcome")
+plt.xticks(rotation = 15)
+
+Shown above, there are very few "Active" cases. Our goal is to see wether those active patients will be resolved or not. First, let's see the attributes on the people who had a fatal outcome due to COVID19.
+
+fatal = df[df['Outcome'] == 'FATAL']
+fatal['Age Group'].value_counts()
+
+COVID19 is most fatal to people ages 80 and above
+
+fatal['Client Gender'].value_counts()
+
+## Creating the model
+
+df['Outcome'].unique()
+
+df=df.fillna("")
+df.isnull().sum()
+
+Res = df[df['Outcome'] == 'RESOLVED']
+Fatal = df[df['Outcome'] == 'FATAL']
+Active = df[df['Outcome'] == 'ACTIVE']
+df_test = pd.concat([Res,Fatal]) ## Using RESOLVED and FATA data as our test data
+test_outcome = {'RESOLVED': 1, 'FATAL': 0}
+df_test['Outcome'] = df_test['Outcome'].map(test_outcome)
+df_test.head()
+
+
+### Using Random Forest Classifier
+
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+
+
+target = 'Outcome'
+features = df_test[['Outbreak Associated', 'Age Group', 'Neighbourhood Name', 'FSA',
+       'Source of Infection', 'Classification', 'Client Gender', 'Currently Hospitalized',
+       'Currently in ICU', 'Currently Intubated', 'Ever Hospitalized',
+       'Ever in ICU', 'Ever Intubated']]
+
+
+y = df_test.pop('Outcome')
+X = features.astype(str)
+
+y.shape
+
+X.shape
+
+seed = 42
+X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.3, random_state = seed)
+
+X_train = X_train.fillna('na')
+X_test = X_test.fillna('na')
+X_train.dtypes
+
+features_to_encode = list(X_train.select_dtypes(include = ['object']).columns) 
+
+#transforming the categorical variables, but does not touch the numerical ones
+
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import make_column_transformer
+col_trans = make_column_transformer(
+                        (OneHotEncoder(handle_unknown='ignore'),features_to_encode),
+                        remainder = "passthrough"
+                        )
+
+from sklearn.ensemble import RandomForestClassifier
+rf_classifier = RandomForestClassifier(
+                      min_samples_leaf=50,
+                      n_estimators=150,
+                      bootstrap=True,
+                      oob_score=True,
+                      n_jobs=-1,
+                      random_state=seed,
+                      max_features='auto')
+
+from sklearn.pipeline import make_pipeline
+pipe = make_pipeline(col_trans, rf_classifier)
+pipe.fit(X_train, y_train)
+
+y_pred = pipe.predict(X_test)
+y_pred
+
+#Getting accuracy of the train data
+from sklearn.metrics import accuracy_score, confusion_matrix, precision_score, recall_score, roc_auc_score, roc_curve, f1_score
+
+accuracy_score(y_test, y_pred)
+print(f"The accuracy of the model is {round(accuracy_score(y_test,y_pred),3)*100} %")
+
+train_probs = pipe.predict_proba(X_train)[:,1] 
+probs = pipe.predict_proba(X_test)[:, 1]
+train_predictions = pipe.predict(X_train)
+
+print(f'Train ROC AUC Score: {roc_auc_score(y_train, train_probs)}')
+print(f'Test ROC AUC  Score: {roc_auc_score(y_test, probs)}')
+
+#using model to predict Active COVID19 patients' Outcomes
+
+test = Active.fillna('na')
+test = test[['Outbreak Associated', 'Age Group', 'Neighbourhood Name', 'FSA',
+       'Source of Infection', 'Classification', 'Client Gender', 'Currently Hospitalized',
+       'Currently in ICU', 'Currently Intubated', 'Ever Hospitalized',
+       'Ever in ICU', 'Ever Intubated']]
+
+test.shape
+
+final_report = test
+final_report['Outcome'] = pipe.predict(test)
+final_report = final_report.loc[:,['Outcome']]
+
+final_report= final_report.replace(1, 'RESOLVED')
+final_report= final_report.replace(0, 'FATAL')
+
+final_report.Outcome.value_counts()
+
+df=df.fillna("")
+df.isnull().sum()
+
+Res = df[df['Outcome'] == 'RESOLVED']
+Fatal = df[df['Outcome'] == 'FATAL']
+Active = df[df['Outcome'] == 'ACTIVE']
+df_test = pd.concat([Res,Fatal]) ## Using RESOLVED and FATA data as our test data
+df_test.head()
+
+df_test.Outcome.value_counts(normalize=True)
+
+**Results**: Using the Random Forest Classifier in prediciting the test data (which are people with the "ACTIVE" status), we see that 595/595 people resolve from COVID19, meaning there are no fatal outcomes given a 92.5% accuracy. From our training data, we were expecting about 92% to resolve, and about 7% to have a fata outcome, though after running the model, it is giving us 100% resolved outcomes.
+
+
